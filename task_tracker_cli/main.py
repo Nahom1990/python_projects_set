@@ -18,92 +18,109 @@ class Task:
     def get_status(self):
         return self._status
 
+    def __repr__(self) -> str:
+        return f"id:{self.id}, description:{self.description}, status:{self._status}"
+
 
 class TaskManager:
     def __init__(self) -> None:
-        self.tasks:list[Task]=[]
+        self.tasks:dict[int,Task]={}
         self.file_path="tasks.json"
 
-    def add_task(self, task:Task):
-        
-        self.tasks.append(task)
+    def read_json(self):
         if os.path.exists(self.file_path):
-            with open(file=self.file_path,mode="r") as json_file:
+            with open(self.file_path,"r") as file:
                 try:
-                    data=json.load(json_file)
-                    if not isinstance(data,list):
-                        data=[data]
+                    data=json.load(file)
+                    return data
                 except json.JSONDecodeError:
-                    data=[]
+                    return {}
+        return {}
 
-        else:
-            data=[]
 
-        data.append(task.__dict__)
+    def add_task(self, task:Task):
+        task_id=task.id
+        self.tasks[task_id]=task
+        
+        data=self.read_json()
+
+        data[str(task_id)]=task.__dict__
 
         with open(self.file_path,"w") as file:
             json.dump(data,file,indent=4)
 
         return True
 
-    def update_task(self,id,new_description):
-        if os.path.exists(self.file_path):
-            with open(file=self.file_path,mode="r") as file:
-                try:
-                    data=json.load(file)
-                    if not isinstance(data,list):
-                        data=[data]
-                except json.JSONDecodeError:
-                    data=[]
-        else:
-            raise ValueError("no file in the given item")
+    def update_task(self,update_id,new_description):
         
+        update_id=int(update_id)
 
+        if update_id not in self.tasks:
+            raise KeyError(f"Task with ID {update_id} not found.")
 
-        for task in self.tasks:
-            if task.id==id:
-                if not task.get_status()=="pending":
-                    raise ValueError("tasks in progress or done cant be updated")
+        task = self.tasks[update_id]
+        if task.get_status()!="pending":
+            raise ValueError("tasks in progress or done cant be updated")
 
-                task.updated_at=time.time()
-                task.description=new_description
-                return True
+        task.updated_at=time.time()
+        task.description=new_description
+
+        data=self.read_json()
+
+        data[str(update_id)]=task.__dict__ #why isnt this replacing the initial ater update?
+
+        with open(file=self.file_path,mode="w") as file:
+            data=json.dump(data,file,indent=4)
         return False
             
 
     def mark_task(self,id,new_status):
-        for task in self.tasks:
-            if task.id==id:
+        data=self.read_json()
+
+        task=self.tasks[id]
+        if task.get_status() == "pending":
+            if new_status=="done":
+                raise ValueError("must be in progress before being done")
+            elif new_status=="inprogress":
                 task.set_status(new_status)
-                return new_status
-        return False
+        elif task.get_status() =="inprogress":
+            if new_status=="done":
+                task.set_status(new_status)
+            elif new_status=="pending":
+                raise ValueError("inprogress cant go back to pending")
+
+        data[str(id)]=task.__dict__
+        with open(file=self.file_path,mode="w") as file:
+            data=json.dump(data,file,indent=4)
+        
+
     
-    def list_all_tasks(self)->list[Task]:
+    def list_all_tasks(self)->dict[int,Task]:
         return self.tasks
 
-    def list_done_tasks(self)->list[Task]:
-        done_tasks=[]
-        for task in self.tasks:
-            if task.get_status()=="done":
-                done_tasks.append(task)
+    # def list_done_tasks(self)->list[Task]:
+    #     done_tasks=[]
+    #     for task in self.tasks:
+    #         if task.get_status()=="done":
+    #             done_tasks.append(task)
 
-        return done_tasks
+    #     return done_tasks
 
-    def list_all_not_done_tasks(self)->list[Task]:
-        not_done_tasks=[]
-        for task in self.tasks:
-            if not task.get_status()=="done":
-                not_done_tasks.append(task)
+    # def list_all_not_done_tasks(self)->list[Task]:
+    #     not_done_tasks=[]
+    #     for task in self.tasks:
+    #         if not task.get_status()=="done":
+    #             not_done_tasks.append(task)
 
-        return not_done_tasks
+    #     return not_done_tasks
 
-    def list_progress_tasks(self)->list[Task]:
-        progress_tasks=[]
-        for task in self.tasks:
-            if task.get_status()=="inprogress":
-                progress_tasks.append(task)
+    # def list_progress_tasks(self)->list[Task]:
+    #     progress_tasks=[]
+    #     for task in self.tasks:
+    #         if task.get_status()=="inprogress":
+    #             progress_tasks.append(task)
 
-        return progress_tasks
+    #     return progress_tasks
 
 
 task1=Task("first_task")
@@ -113,3 +130,6 @@ manager=TaskManager()
 
 manager.add_task(task1)
 manager.add_task(task2)
+manager.update_task("1","this is the new description")
+manager.mark_task(1,"inprogress")
+print(manager.list_all_tasks())

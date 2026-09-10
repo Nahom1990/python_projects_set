@@ -1,16 +1,16 @@
-[
-    {
+{
+    "0": {
         "id": 0,
         "description": "first_task",
         "_status": "pending",
-        "created_at": 1789048715.6120033,
+        "created_at": 1789056022.6945596,
         "updated_at": null
     },
-    {
+    "1": {
         "id": 1,
-        "description": "second_task",
-        "_status": "pending",
-        "created_at": 1789048715.6120055,
-        "updated_at": null
+        "description": "this is the new description",
+        "_status": "inprogress",
+        "created_at": 1789056022.6945612,
+        "updated_at": 1789056022.6949623
     }
-]
+}
