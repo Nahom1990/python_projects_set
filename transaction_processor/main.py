@@ -1,15 +1,3 @@
-"""
-Project 1 — Transaction Processing Engine
-Difficulty: 1/10 → 2/10
-
-We're starting deliberately below your theoretical ceiling.
-
-The goal isn't to build something impressive. The goal is to see whether you can take a messy requirement and decompose it into a program.
-
-Imagine you're building the core of a small financial application.
-
-You receive transactions like:
-
 transactions = [
     {
         "id": 1,
@@ -48,205 +36,142 @@ transactions = [
     },
 ]
 
-Your program needs to process these transactions.
 
-Requirements
+VALID_TYPES = {"income", "expense"}
+VALID_STATUSES = {"completed", "pending", "failed"}
 
-Build a small processing system that can:
 
-1. Clean the input
+def parse_and_validate(raw_tx: dict) -> tuple[bool, dict | str]:
+    # 1. Check required keys
+    required_keys = {"id", "user", "type", "amount", "status"}
+    if not required_keys.issubset(raw_tx.keys()):
+        missing = required_keys - raw_tx.keys()
+        return False, f"Missing required fields: {missing}"
 
-User names may contain unnecessary whitespace.
+    # 2. Normalize user string
+    user = str(raw_tx["user"]).strip()
+    if not user:
+        return False, "User name cannot be empty"
 
-Amounts arrive as strings.
+    # 3. Parse amount safely
+    try:
+        amount = float(raw_tx["amount"])
+    except (ValueError, TypeError):
+        return False, f"Invalid numeric amount: '{raw_tx['amount']}'"
 
-Transactions may contain invalid data.
+    # 4. Enforce domain rules
+    if amount <= 0:
+        return False, f"Amount must be positive, got: {amount}"
 
-2. Validate transactions
+    tx_type = str(raw_tx["type"]).strip().lower()
+    if tx_type not in VALID_TYPES:
+        return False, f"Invalid type: '{tx_type}'. Must be 'income' or 'expense'"
 
-A valid transaction must have:
+    status = str(raw_tx["status"]).strip().lower()
+    if status not in VALID_STATUSES:
+        return (
+            False,
+            f"Invalid status: '{status}'. Must be 'completed', 'pending', or 'failed'",
+        )
 
-an id
-a user
-a valid type: "income" or "expense"
-a positive numerical amount
-a valid status: "completed", "pending", or "failed"
-
-Invalid transactions should not crash the entire processing operation.
-
-3. Process only completed transactions
-
-Pending and failed transactions shouldn't affect the financial totals.
-
-4. Calculate per-user results
-
-For every user, calculate:
-
-total_income
-total_expense
-balance
-number_of_transactions
-
-For example, conceptually:
-
-{
-    "Nahom": {
-        "total_income": 1500,
-        "total_expense": 200,
-        "balance": 1300,
-        "number_of_transactions": 2,
+    # 5. Return fresh, clean dictionary payload
+    cleaned_tx = {
+        "id": raw_tx["id"],
+        "user": user,
+        "type": tx_type,
+        "amount": amount,
+        "status": status,
     }
-}
-5. Produce a final report
+    return True, cleaned_tx
 
-The system should return something representing:
+def aggregate_user_metrics(valid_transactions: list[dict]) -> dict:
+    users = {}
 
-Processed transactions: ...
-Invalid transactions: ...
-Users: ...
+    for tx in valid_transactions:
+        # Ignore pending/failed for financial calculations
+        if tx["status"] != "completed":
+            continue
 
-User: Nahom
-Income: ...
-Expenses: ...
-Balance: ...
-Transactions: ...
+        user = tx["user"]
 
-You decide the exact structure.
+        # Initialize user state if first time seen
+        if user not in users:
+            users[user] = {
+                "total_income": 0.0,
+                "total_expense": 0.0,
+                "balance": 0.0,
+                "number_of_transactions": 0,
+            }
 
-But there's an important constraint
+        # Update metrics locally
+        stats = users[user]
+        stats["number_of_transactions"] += 1
 
-Don't immediately start writing code.
+        if tx["type"] == "income":
+            stats["total_income"] += tx["amount"]
+            stats["balance"] += tx["amount"]
+        elif tx["type"] == "expense":
+            stats["total_expense"] += tx["amount"]
+            stats["balance"] -= tx["amount"]
 
-I specifically want to see your programmer thinking first.
+    return users
 
-Before touching the keyboard, answer these questions in your own words:
+def process_transaction_batch(raw_transactions: list[dict]) -> dict:
+    valid_records = []
+    invalid_records = []
 
-A. Problem decomposition
+    for raw_tx in raw_transactions:
+        is_valid, result = parse_and_validate(raw_tx)
 
-What are the separate problems hiding inside this seemingly simple requirement?
+        if is_valid:
+            valid_records.append(result)
+        else:
+            invalid_records.append({"raw": raw_tx, "reason": result})
 
-For example, don't just say:
+    # Aggregation step
+    user_summary = aggregate_user_metrics(valid_records)
 
-"I need a function that processes transactions."
+    # Return structured state payload
+    return {
+        "processed_count": len(valid_records),
+        "invalid_count": len(invalid_records),
+        "invalid_records": invalid_records,
+        "users": user_summary,
+    }
 
-Think about what transformations and responsibilities actually exist.
+def format_text_report(report_data: dict) -> str:
+    lines = []
+    lines.append("=== FINANCIAL TRANSACTION REPORT ===")
+    lines.append(f"Processed transactions: {report_data['processed_count']}")
+    lines.append(f"Invalid transactions:   {report_data['invalid_count']}")
+    lines.append("")
 
-B. Data flow
+    lines.append("Users Summary:")
+    lines.append("-----------------------------------")
 
-Describe how you imagine a transaction moving through the system.
+    users = report_data["users"]
+    if not users:
+        lines.append("No completed transaction data available.")
 
-Something like:
+    for user, stats in users.items():
+        lines.append(f"User: {user}")
+        lines.append(f"  Income:       ${stats['total_income']:,.2f}")
+        lines.append(f"  Expenses:     ${stats['total_expense']:,.2f}")
+        lines.append(f"  Balance:      ${stats['balance']:,.2f}")
+        lines.append(f"  Transactions: {stats['number_of_transactions']}")
+        lines.append("")
 
-raw data
-   ↓
-?
-   ↓
-?
-   ↓
-?
-   ↓
-final report
+    if report_data["invalid_records"]:
+        lines.append("Invalid Record Details:")
+        lines.append("-----------------------------------")
+        for inv in report_data["invalid_records"]:
+            lines.append(
+                f"  - ID {inv['raw'].get('id', 'Unknown')}: {inv['reason']}"
+            )
 
-But design your own flow.
+    return "\n".join(lines)
 
-C. Data representation
+report_data = process_transaction_batch(transactions)
+formatted_report = format_text_report(report_data)
 
-What structures would you use?
-
-dictionaries?
-lists?
-tuples?
-dataclasses?
-classes?
-closures?
-something else?
-
-There is no prescribed answer.
-
-Explain why.
-
-D. Functional vs OOP
-
-This is important given what we've just studied.
-
-Would you approach this primarily with:
-
-functional composition,
-classes/objects,
-a mixture,
-something else?
-
-Again, don't choose something because we studied it. Choose based on the problem.
-
-E. Mutation
-
-Where, if anywhere, do you think mutation is appropriate?
-
-Would you mutate the incoming transaction dictionaries?
-
-Would you create new structures?
-
-Would you use an accumulator?
-
-Explain your reasoning.
-
-F. Error handling
-
-What should happen if you encounter something like:
-
-{
-    "id": 10,
-    "user": "John",
-    "type": "income",
-    "amount": "hello",
-    "status": "completed",
-}
-
-Should it raise?
-
-Skip it?
-
-Collect it somewhere?
-
-Return an error?
-
-Why?
-
-G. Most importantly
-
-What would your functions/components be?
-
-Don't give me code yet.
-
-Give me something like:
-
-component/function 1 → responsibility
-component/function 2 → responsibility
-component/function 3 → responsibility
-...
-
-You are free to completely reject that approach.
-
-One more rule
-
-Don't try to make this a production banking system.
-
-No FastAPI.
-
-No database.
-
-No Redis.
-
-No Kafka.
-
-No external libraries.
-
-No design-pattern showcase.
-
-No unnecessary abstractions.
-
-Python standard library + your brain.
-
-The challenge here is not:
-
-"How much architecture can Nahom create?""""
+print(formatted_report)
