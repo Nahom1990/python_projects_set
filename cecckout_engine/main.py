@@ -65,6 +65,3 @@ def parse_and_validate(order:dict):
             ],
             "coupon": order["coupon"],
         })
-
-
-    
