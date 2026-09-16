@@ -67,77 +67,109 @@ raw_fulfillment_requests = [
     },
 ]
 
-valid_requests=[]
-invalid_requests=[]
+
 COUNTRIES=["US","ET","UK"]
 REQURED_FIELDS={"order_id", "customer", "shipping_address", "items", "payment_status"}
-for request in raw_fulfillment_requests:
-    if not REQURED_FIELDS.issubset(request.keys()):
-        invalid_requests.append(request)
-        continue
-    if request["payment_status"]!="PAID":
-        invalid_requests.append(request)
-        continue
-    if request["shipping_address"]["country"] not in COUNTRIES:
-        invalid_requests.append(request)
-        continue
 
+def parse_and_clean(request):
+
+    if not REQURED_FIELDS.issubset(request.keys()):
+        return (False,"missing required fields")
+    
+    if request["payment_status"]!="PAID":
+        return (False,"payment status is not paid")
+    
+    shipping = request.get("shipping_address", {})
+    if not isinstance(shipping, dict) or shipping.get("country") not in COUNTRIES:
+        return False, f"Invalid or unsupported country: '{shipping.get('country')}'"
+
+    items = request.get("items", [])
+    if not isinstance(items, list) or len(items) == 0:
+        return False, "Order must contain at least one item"
+
+    cleaned_items = []
     try:
-        for item in request["items"]:
-            item["price"]=float(item["price"])
-            item["weight_kg"]=float(item["weight_kg"])
-            item["qty"]=int(item["qty"])
-    except Exception:
-        invalid_requests.append(request)
-        continue
+        for item in items:
+            cleaned_items.append({
+                "sku": item["sku"],
+                "price": float(item["price"]),
+                "weight_kg": float(item["weight_kg"]),
+                "qty": int(item["qty"]),
+            })
+    except (ValueError, TypeError, KeyError):
+        return False, "Invalid price, weight, or quantity format in items"
+    
 
     street=request["shipping_address"]["street"].strip()
 
-    cleaned_request={
+    cleaned_order = {
         "order_id": request["order_id"],
         "customer": request["customer"],
-        "shipping_address": {**request["shipping_address"],"street":street},
-        "items": request["items"],
-        "payment_status": request["payment_status"]}
+        "shipping_address": {
+            "street": street,
+            "country": shipping["country"],
+            "express": bool(shipping.get("express", False)),
+        },
+        "items": cleaned_items,
+        "payment_status": request["payment_status"],
+    }
+    return True, cleaned_order
 
-    valid_requests.append(cleaned_request)
+TIER_SCORES = {"standard": 0, "gold": 10, "vip": 20}
+COUNTRY_RATES={"US" :5.00 ,"ET":8.00 ,"UK" :6.50} 
+def calculate_order_fulfilment(order):
+    subtotal = sum(item["price"] * item["qty"] for item in order["items"])
+    total_weight = sum(item["weight_kg"] * item["qty"] for item in order["items"])
 
-#print(valid_requests)
+    country = order["shipping_address"]["country"]
+    base_shipping = COUNTRY_RATES[country] * total_weight
+    
+    is_express = order["shipping_address"]["express"]
+    express_surcharge = 15.0 if is_express else 0.0
+    
+    total_cost = subtotal + base_shipping + express_surcharge
 
-shipping_metrics={}
-country_rates={"US" :5.00 ,"ET":8.00 ,"UK" :6.50} 
-for request in valid_requests:
-    if request["order_id"] not in shipping_metrics:
-        shipping_metrics[request["order_id"]]={
-            "subtotal":0,
-            "total_weight":0,
-            "base_shipping_cost":0,
-            "total_cost":0,
-            "tier":request["customer"]["tier"]
-        }
-
-    subtotal=sum([item["price"]*item["qty"] for item in request["items"]])
-    total_weight=sum([item["weight_kg"]*item["qty"] for item in request["items"]])
-    base_shipping_cost=country_rates[request["shipping_address"]["country"]]*total_weight
-    express=15 if request["shipping_address"]["express"] else 0
-
-    total_order=subtotal+base_shipping_cost+express
-
-    shipping_metrics[request["order_id"]]={
-        "subtotal":shipping_metrics[request["order_id"]]["subtotal"]+subtotal,
-                    "total_weight":shipping_metrics[request["order_id"]]["total_weight"]+total_weight,
-                    "base_shipping_cost":shipping_metrics[request["order_id"]]["base_shipping_cost"]+base_shipping_cost,
-                    "total_cost":shipping_metrics[request["order_id"]]["total_cost"]+total_order,
-                    "tier":request["customer"]["tier"],
-                    "express":request["shipping_address"]["express"]
-                }
+    tier = order["customer"].get("tier", "standard")
 
 
+    priority_score = 10 + TIER_SCORES.get(tier, 0) + (15 if is_express else 0)
 
-tier_info={"standard":0,"gold":10,"vip":20}
-for order, summary in shipping_metrics.items():
-    express=15 if summary["express"] else 0
-    priority_score=tier_info[summary["tier"]]+express+10
-    shipping_metrics[order]={**shipping_metrics[order],"priority_score":priority_score}
+    return {
+        "order_id": order["order_id"],
+        "subtotal": subtotal,
+        "total_weight_kg": total_weight,
+        "base_shipping_cost": base_shipping,
+        "express_surcharge": express_surcharge,
+        "total_cost": total_cost,
+        "priority_score": priority_score,
+    }
 
-print(shipping_metrics)
+
+def process_fulfillment_batch(raw_fulfillment):
+    valid_metrics = []
+    invalid_requests = []
+
+    for request in raw_fulfillment:
+        is_valid, result = parse_and_clean(request)
+        if is_valid:
+            metrics = calculate_order_fulfilment(result)
+            valid_metrics.append(metrics)
+        else:
+            invalid_requests.append({"raw": request, "reason": result})
+
+    # Sort valid orders by priority_score (highest priority first)
+    valid_metrics.sort(key=lambda x: x["priority_score"], reverse=True)
+
+    return {
+        "valid": valid_metrics,
+        "invalid": invalid_requests,
+    }
+
+
+print(process_fulfillment_batch(raw_fulfillment_requests)["valid"])
+
+
+
+
+
+
